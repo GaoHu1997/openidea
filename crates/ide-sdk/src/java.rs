@@ -1047,10 +1047,12 @@ mod tests {
         assert_eq!(cfg.env["JAVA_HOME"], fixtures.path().join("opt/own-jdk").to_string_lossy());
 
         // Too old for this jdtls: the user's choice is not overridden, it is explained.
-        let cfg = run(Some(&jdk(21, "/jdk21")), 25);
+        let old = jdk(21, "/jdk21");
+        let cfg = run(Some(&old), 25);
         assert!(!cfg.env.contains_key("JAVA_HOME"));
         let err = cfg.launch_error.unwrap();
-        assert!(err.contains("/jdk21") && err.contains("JDK 25 or newer"), "{err}");
+        let old_home = old.home.display().to_string();
+        assert!(err.contains(&old_home) && err.contains("JDK 25 or newer"), "{err}");
         assert!(err.contains(SERVER_JDK_SETTING), "both messages point at the same setting: {err}");
     }
 
