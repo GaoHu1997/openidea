@@ -6,6 +6,11 @@ name: Sync upstream tags
 # scheduled workflows in a fork until they are enabled by hand and delays them
 # for hours after changes. Trigger this workflow manually to force a check, or
 # run Release (workflow_dispatch) with a specific tag to build an older one.
+#
+# Mirroring the tag refs needs a personal access token in the SYNC_TOKEN secret
+# (Contents: read and write): the default GITHUB_TOKEN is not allowed to create
+# git references. Building does not depend on it — Release creates the tag
+# itself through the releases API.
 
 on:
   schedule:
@@ -31,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build_tag: ${{ steps.tags.outputs.build_tag }}
+      build_sha: ${{ steps.tags.outputs.build_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +47,7 @@ jobs:
         env:
           UPSTREAM: https://github.com/l0ng-ai/openidea.git
           GITHUB_TOKEN: ${{ github.token }}
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
           refs() {
             git ls-remote --tags "$1" \
@@ -58,11 +65,12 @@ jobs:
             # point at such commits. Their commits already live in this fork's
             # history, so creating the ref is all it takes (upstream's annotated
             # tags become lightweight ones pointing at the same commit).
+            AUTH="${SYNC_TOKEN:-$GITHUB_TOKEN}"
             while read -r tag; do
               sha="$(git ls-remote "$UPSTREAM" "refs/tags/$tag^{}" | awk '{print $1}')"
               [ -n "$sha" ] || sha="$(git ls-remote "$UPSTREAM" "refs/tags/$tag" | awk '{print $1}')"
               code="$(curl -s -o resp.json -w '%{http_code}' -X POST \
-                -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $AUTH" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$GITHUB_REPOSITORY/git/refs" \
                 -d "{\"ref\":\"refs/tags/$tag\",\"sha\":\"$sha\"}")"
               if [ "$code" = 201 ]; then
@@ -70,24 +78,38 @@ jobs:
               elif grep -q 'Reference already exists' resp.json; then
                 echo "$tag already present"
               else
-                echo "::warning::could not create $tag (HTTP $code): $(cat resp.json)"
+                echo "::warning::could not mirror $tag (HTTP $code): $(cat resp.json)"
               fi
             done < missing-tags.txt
           else
             echo "No new upstream tags."
           fi
-          # Only the newest new v* tag gets built here. A first run can see every
-          # historical tag at once; the rest stay mirrored and an older one can be
-          # built on demand through Release's workflow_dispatch.
-          build_tag="$(grep '^v' missing-tags.txt | sort -V | tail -1 || true)"
-          echo "build_tag=$build_tag" >> "$GITHUB_OUTPUT"
-          echo "Building: ${build_tag:-nothing new}"
+          # Only the newest upstream v* tag is built, and only when it is new.
+          # Older tags are mirrored but never built automatically (run Release's
+          # workflow_dispatch for one of those); building creates its ref anyway
+          # through the releases API, so a missing mirror never rebuilds a tag.
+          latest="$(grep '^v' upstream-tags.txt | sort -V | tail -1 || true)"
+          if [ -n "$latest" ] && grep -qxF "$latest" missing-tags.txt; then
+            build_tag="$latest"
+          else
+            build_tag=""
+          fi
+          build_sha=""
+          if [ -n "$build_tag" ]; then
+            build_sha="$(git ls-remote "$UPSTREAM" "refs/tags/$build_tag^{}" | awk '{print $1}')"
+            [ -n "$build_sha" ] || build_sha="$(git ls-remote "$UPSTREAM" "refs/tags/$build_tag" | awk '{print $1}')"
+          fi
+          {
+            echo "build_tag=$build_tag"
+            echo "build_sha=$build_sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building: ${build_tag:-nothing new} @ ${build_sha:-}"
 
-  # Tags are created through the REST API, and this fork's Release workflow has
-  # no `push: tags` trigger anymore (a tag's own commit carries the upstream
-  # workflow file without the portable exe step, so building from it would drop
-  # it silently). The build is driven here through workflow_call, which always
-  # runs this fork's current Release workflow.
+  # Tags are created through the releases API below, and this fork's Release
+  # workflow has no `push: tags` trigger (a tag's own commit carries the
+  # upstream workflow file without the portable exe step, so building from it
+  # would drop it silently). The build is driven here through workflow_call,
+  # which always runs this fork's current Release workflow.
   release:
     name: Release ${{ needs.sync.outputs.build_tag }}
     needs: sync
@@ -97,4 +119,5 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.sync.outputs.build_tag }}
+      sha: ${{ needs.sync.outputs.build_sha }}
     secrets: inherit

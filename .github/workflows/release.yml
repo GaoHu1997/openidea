@@ -16,6 +16,11 @@ on:
         description: "Tag to release (e.g. v0.1.0); must already exist"
         required: true
         type: string
+      sha:
+        description: "Commit the tag points at; lets create-release make the tag if it is not mirrored yet"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -27,6 +32,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   TAG: ${{ inputs.tag || github.ref_name }}
+  SHA: ${{ inputs.sha }}
 
 jobs:
   # Creates (or reuses) one draft release that every platform build uploads into.
@@ -36,7 +42,7 @@ jobs:
       release_id: ${{ steps.release.outputs.id }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: "${{ env.TAG }}" }
+        with: { ref: "${{ env.SHA || env.TAG }}" }
       - name: Tag matches app version
         run: |
           app="v$(jq -r .version src-tauri/tauri.conf.json)"
@@ -59,6 +65,7 @@ jobs:
             }
             const { data } = await github.rest.repos.createRelease({
               owner, repo, tag_name: tag, name: `OpenIDEA ${tag}`,
+              target_commitish: process.env.SHA || undefined,
               draft: true, prerelease: tag.includes("-"), generate_release_notes: true,
             });
             core.setOutput("id", data.id);
