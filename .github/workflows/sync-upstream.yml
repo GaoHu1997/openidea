@@ -2,18 +2,15 @@ name: Sync upstream tags
 
 # Mirrors new release tags from l0ng-ai/openidea into this fork and builds the
 # newest one (which is where the portable exe is produced). Scheduled runs poll
-# upstream twice an hour; GitHub delays scheduled workflows during busy periods,
-# so "up to date within roughly an hour" is the realistic guarantee. Trigger
-# this workflow manually to force a check, or run Release (workflow_dispatch)
-# with a specific tag to build an older one that was only mirrored.
+# upstream twice an hour, and every push to main checks too: GitHub does not run
+# scheduled workflows in a fork until they are enabled by hand and delays them
+# for hours after changes. Trigger this workflow manually to force a check, or
+# run Release (workflow_dispatch) with a specific tag to build an older one.
 
 on:
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:
-  # GitHub does not run scheduled workflows in a fork until it is enabled by
-  # hand and delays them for hours after changes, so also check on every push
-  # to main — cheap no-op when upstream has no new tag.
   push:
     branches: [main]
   # Lets a token with only `repo` scope (no `workflow` scope) kick a check:
@@ -37,12 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Shallow is fine: each tag is fetched individually from upstream.
+          # Shallow is fine: tags are created through the API, not fetched.
           fetch-depth: 1
       - name: Find new upstream tags
         id: tags
         env:
           UPSTREAM: https://github.com/l0ng-ai/openidea.git
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           refs() {
             git ls-remote --tags "$1" \
@@ -55,9 +53,25 @@ jobs:
           if [ -s missing-tags.txt ]; then
             echo "New upstream tags:"
             cat missing-tags.txt
+            # Mirror each tag with the REST API instead of `git push`: GITHUB_TOKEN
+            # may not push commits that touch .github/workflows, and upstream tags
+            # point at such commits. Their commits already live in this fork's
+            # history, so creating the ref is all it takes (upstream's annotated
+            # tags become lightweight ones pointing at the same commit).
             while read -r tag; do
-              git fetch --no-tags "$UPSTREAM" "refs/tags/$tag:refs/tags/$tag"
-              git push origin "refs/tags/$tag"
+              sha="$(git ls-remote "$UPSTREAM" "refs/tags/$tag^{}" | awk '{print $1}')"
+              [ -n "$sha" ] || sha="$(git ls-remote "$UPSTREAM" "refs/tags/$tag" | awk '{print $1}')"
+              code="$(curl -s -o resp.json -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/git/refs" \
+                -d "{\"ref\":\"refs/tags/$tag\",\"sha\":\"$sha\"}")"
+              if [ "$code" = 201 ]; then
+                echo "created $tag -> $sha"
+              elif grep -q 'Reference already exists' resp.json; then
+                echo "$tag already present"
+              else
+                echo "::warning::could not create $tag (HTTP $code): $(cat resp.json)"
+              fi
             done < missing-tags.txt
           else
             echo "No new upstream tags."
@@ -69,10 +83,11 @@ jobs:
           echo "build_tag=$build_tag" >> "$GITHUB_OUTPUT"
           echo "Building: ${build_tag:-nothing new}"
 
-  # The default GITHUB_TOKEN pushing a tag above does not trigger Release's
-  # `push` tag trigger (events from GITHUB_TOKEN never start workflows), so the
-  # build is driven here through workflow_call instead. This also avoids a
-  # double build if a PAT ever pushes the same tag.
+  # Tags are created through the REST API, and this fork's Release workflow has
+  # no `push: tags` trigger anymore (a tag's own commit carries the upstream
+  # workflow file without the portable exe step, so building from it would drop
+  # it silently). The build is driven here through workflow_call, which always
+  # runs this fork's current Release workflow.
   release:
     name: Release ${{ needs.sync.outputs.build_tag }}
     needs: sync

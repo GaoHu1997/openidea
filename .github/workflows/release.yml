@@ -1,15 +1,15 @@
 name: Release
 on:
-  push:
-    tags: ["v*"]
+  # No `push: tags` trigger: a tag's own commit carries the upstream workflow
+  # file without the portable exe step, so building from it would drop it
+  # silently. Every build runs from this branch — driven by sync-upstream.yml
+  # (workflow_call) or by hand (workflow_dispatch).
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to release (e.g. v0.1.0); must already exist"
         required: true
   # Called by sync-upstream.yml once it has mirrored a new upstream tag here.
-  # (A tag pushed with the default GITHUB_TOKEN does not trigger `push`, so the
-  # sync workflow drives this one explicitly through workflow_call.)
   workflow_call:
     inputs:
       tag:
