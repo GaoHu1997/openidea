@@ -132,6 +132,17 @@ jobs:
             [ -n "${!v}" ] && { echo "$v<<__EOF__"; echo "${!v}"; echo "__EOF__"; } >> "$GITHUB_ENV"
           done
           true
+      # The updater signing key is private to upstream; without it tauri build
+      # dies at "A public key has been found, but no private key". The tag's
+      # tauri.conf.json (from upstream) enables updater artifacts, so patch the
+      # checked-out copy when no key is configured. Keeping the upstream pubkey
+      # means the app still self-updates from upstream's official feed.
+      - name: Disable updater artifacts when unsigned
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: bash
+        run: |
+          jq '.bundle.createUpdaterArtifacts = false' src-tauri/tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp src-tauri/tauri.conf.json
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
