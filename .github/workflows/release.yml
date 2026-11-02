@@ -7,17 +7,26 @@ on:
       tag:
         description: "Tag to release (e.g. v0.1.0); must already exist"
         required: true
+  # Called by sync-upstream.yml once it has mirrored a new upstream tag here.
+  # (A tag pushed with the default GITHUB_TOKEN does not trigger `push`, so the
+  # sync workflow drives this one explicitly through workflow_call.)
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0); must already exist"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # Creates (or reuses) one draft release that every platform build uploads into.
@@ -138,6 +147,26 @@ jobs:
             xcrun stapler staple "$dmg"
             gh release upload "$TAG" "$dmg" --clobber
           done
+
+      # Portable build (no installer): the bare main binary, which embeds the
+      # frontend, so it runs as a single self-contained exe. Only the WebView2
+      # Runtime must be present (preinstalled on Windows 10 1803+ / Windows 11).
+      - name: Portable exe
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          case "$TARGET" in
+            x86_64-*) arch=x64 ;;
+            aarch64-*) arch=arm64 ;;
+            *) echo "::error::no portable artifact arch for $TARGET"; exit 1 ;;
+          esac
+          name="OpenIDEA_${TAG#v}_${arch}-portable.exe"
+          cp "target/$TARGET/release/openidea.exe" "$name"
+          sha256sum "$name" > "$name.sha256"
+          gh release upload "$TAG" "$name" "$name.sha256" --clobber
 
   # The remote development server, per host platform it can run on. The desktop
   # app downloads the one for the host (ide-tools `server`) and installs it over SSH.
