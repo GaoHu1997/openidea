@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:
+  # GitHub does not run scheduled workflows in a fork until it is enabled by
+  # hand and delays them for hours after changes, so also check on every push
+  # to main — cheap no-op when upstream has no new tag.
+  push:
+    branches: [main]
   # Lets a token with only `repo` scope (no `workflow` scope) kick a check:
   # POST /repos/<owner>/<repo>/dispatches {"event_type": "sync-upstream"}
   repository_dispatch:
