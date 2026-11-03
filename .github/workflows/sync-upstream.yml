@@ -2,7 +2,7 @@ name: Sync upstream tags
 
 # Mirrors new release tags from l0ng-ai/openidea into this fork and builds the
 # newest one (which is where the portable exe is produced). Scheduled runs poll
-# upstream twice an hour, and every push to main checks too: GitHub does not run
+# upstream every ten minutes, and every push to main checks too: GitHub does not run
 # scheduled workflows in a fork until they are enabled by hand and delays them
 # for hours after changes. Trigger this workflow manually to force a check, or
 # run Release (workflow_dispatch) with a specific tag to build an older one.
@@ -14,7 +14,7 @@ name: Sync upstream tags
 
 on:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "2,12,22,32,42,52 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
