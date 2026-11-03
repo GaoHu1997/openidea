@@ -13,14 +13,9 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0); must already exist"
+        description: "Tag to release (e.g. v0.1.0); must already exist upstream"
         required: true
         type: string
-      sha:
-        description: "Commit the tag points at; lets create-release make the tag if it is not mirrored yet"
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: write
@@ -32,7 +27,6 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   TAG: ${{ inputs.tag || github.ref_name }}
-  SHA: ${{ inputs.sha }}
 
 jobs:
   # Creates (or reuses) the release every build uploads into. Reusing an
@@ -43,7 +37,7 @@ jobs:
       release_id: ${{ steps.release.outputs.id }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: "${{ env.SHA || env.TAG }}" }
+        with: { repository: l0ng-ai/openidea, ref: "${{ env.TAG }}" }
       - name: Tag matches app version
         run: |
           app="v$(jq -r .version src-tauri/tauri.conf.json)"
@@ -66,7 +60,9 @@ jobs:
             }
             const { data } = await github.rest.repos.createRelease({
               owner, repo, tag_name: tag, name: `OpenIDEA ${tag}`,
-              target_commitish: process.env.SHA || undefined,
+              // No target_commitish: the upstream commit behind the tag may not
+              // exist in this fork. Publishing then creates the tag on the
+              // default branch (as v0.1.33 shipped).
               draft: true, prerelease: tag.includes("-"), generate_release_notes: true,
             });
             core.setOutput("id", data.id);
@@ -88,7 +84,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: "${{ env.SHA || env.TAG }}" }
+        with: { repository: l0ng-ai/openidea, ref: "${{ env.TAG }}" }
       - uses: pnpm/action-setup@v4
         with: { version: 11 }
       - uses: actions/setup-node@v4
@@ -111,6 +107,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The build checks out upstream's repo; pin uploads to this fork's release.
+          GH_REPO: ${{ github.repository }}
           TARGET: ${{ matrix.target }}
         run: |
           case "$TARGET" in

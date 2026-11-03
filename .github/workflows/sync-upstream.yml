@@ -36,7 +36,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build_tag: ${{ steps.tags.outputs.build_tag }}
-      build_sha: ${{ steps.tags.outputs.build_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,16 +93,10 @@ jobs:
           else
             build_tag=""
           fi
-          build_sha=""
-          if [ -n "$build_tag" ]; then
-            build_sha="$(git ls-remote "$UPSTREAM" "refs/tags/$build_tag^{}" | awk '{print $1}')"
-            [ -n "$build_sha" ] || build_sha="$(git ls-remote "$UPSTREAM" "refs/tags/$build_tag" | awk '{print $1}')"
-          fi
           {
             echo "build_tag=$build_tag"
-            echo "build_sha=$build_sha"
           } >> "$GITHUB_OUTPUT"
-          echo "Building: ${build_tag:-nothing new} @ ${build_sha:-}"
+          echo "Building: ${build_tag:-nothing new}"
 
   # Tags are created through the releases API below, and this fork's Release
   # workflow has no `push: tags` trigger (a tag's own commit carries the
@@ -119,5 +112,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.sync.outputs.build_tag }}
-      sha: ${{ needs.sync.outputs.build_sha }}
     secrets: inherit
